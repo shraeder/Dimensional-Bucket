@@ -8,8 +8,10 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Levelled;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -52,14 +54,43 @@ public final class BucketListener implements Listener {
 
         Block block = event.getClickedBlock();
         Material type = block.getType();
+        BucketMode mode = bucketItems.getMode(item);
+
+        // Waterlogging is handled during interaction for some blocks/versions (it may not fire
+        // PlayerBucketEmptyEvent), so we implement it here to match vanilla.
+        if (mode == BucketMode.WATER) {
+            BlockData data = block.getBlockData();
+            if (data instanceof Waterlogged waterlogged && !waterlogged.isWaterlogged()) {
+                if (storage.getStored(player.getUniqueId(), FluidType.WATER) <= 0) {
+                    event.setCancelled(true);
+                    player.sendMessage(ChatColor.RED + "You have no water stored.");
+                    return;
+                }
+
+                event.setCancelled(true);
+
+                waterlogged.setWaterlogged(true);
+                block.setBlockData(waterlogged, true);
+                triggerNeighborUpdates(block);
+
+                storage.tryRemove(player.getUniqueId(), FluidType.WATER, 1);
+                storage.save();
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: "
+                        + ChatColor.WHITE + storage.getStored(player.getUniqueId(), FluidType.WATER));
+
+                setItemInHand(player, hand, bucketItems.setMode(item, BucketMode.WATER));
+                return;
+            }
+        }
+
         if (type != Material.CAULDRON && type != Material.WATER_CAULDRON && type != Material.LAVA_CAULDRON) {
             return;
         }
 
         // We handle cauldrons ourselves so the special bucket is never consumed/replaced.
         event.setCancelled(true);
-
-        BucketMode mode = bucketItems.getMode(item);
 
         // COLLECT mode: drain cauldrons into storage.
         if (mode == BucketMode.COLLECT) {
@@ -200,6 +231,14 @@ public final class BucketListener implements Listener {
             default -> null;
         };
 
+        // Vanilla buckets can collect from waterlogged blocks; treat that as collecting a water source.
+        if (fluidType == null) {
+            BlockData data = clicked.getBlockData();
+            if (data instanceof Waterlogged waterlogged && waterlogged.isWaterlogged()) {
+                fluidType = FluidType.WATER;
+            }
+        }
+
         if (fluidType == null) {
             return;
         }
@@ -220,7 +259,15 @@ public final class BucketListener implements Listener {
 
         event.setCancelled(true);
 
-        clicked.setType(Material.AIR, true);
+        // If the clicked block was waterlogged, remove the waterlogged state instead of breaking the block.
+        BlockData data = clicked.getBlockData();
+        if (fluidType == FluidType.WATER && data instanceof Waterlogged waterlogged && waterlogged.isWaterlogged()) {
+            waterlogged.setWaterlogged(false);
+            clicked.setBlockData(waterlogged, true);
+            triggerNeighborUpdates(clicked);
+        } else {
+            clicked.setType(Material.AIR, true);
+        }
         storage.save();
 
         if (fluidType == FluidType.WATER) {
@@ -270,16 +317,93 @@ public final class BucketListener implements Listener {
             return;
         }
 
-        Block target = event.getBlockClicked().getRelative(event.getBlockFace());
-        if (!canPlaceInto(target)) {
+        Block clickedBlock = event.getBlockClicked();
+        Block target = event.getBlock();
+        Material placeMaterial = (fluidType == FluidType.WATER) ? Material.WATER : Material.LAVA;
+
+        // Match vanilla bucket behavior for waterlogging (stairs/slabs/etc).
+        if (fluidType == FluidType.WATER) {
+            // Prefer waterlogging the clicked block (e.g., leaves) if it supports the state.
+            if (clickedBlock != null) {
+                BlockData clickedData = clickedBlock.getBlockData();
+                if (clickedData instanceof Waterlogged waterlogged && !waterlogged.isWaterlogged()) {
+                    event.setCancelled(true);
+
+                    waterlogged.setWaterlogged(true);
+                    clickedBlock.setBlockData(waterlogged, true);
+                    triggerNeighborUpdates(clickedBlock);
+
+                    boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
+                    if (!removed) {
+                        plugin.getLogger().warning("Failed to decrement storage for " + player.getUniqueId());
+                    }
+                    storage.save();
+
+                    player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                    int now = storage.getStored(player.getUniqueId(), fluidType);
+                    player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: " + ChatColor.WHITE + now);
+
+                    // Keep the bucket as the special bucket with the same mode.
+                    ItemStack updated = bucketItems.setMode(inHand, mode);
+                    setItemInHand(player, hand, updated);
+                    return;
+                }
+            }
+
+            // Otherwise, waterlog the event target if it supports waterlogging.
+            BlockData targetData = target.getBlockData();
+            if (targetData instanceof Waterlogged waterlogged) {
+                event.setCancelled(true);
+
+                if (waterlogged.isWaterlogged()) {
+                    player.sendMessage(ChatColor.YELLOW + "That block is already waterlogged.");
+                    return;
+                }
+
+                waterlogged.setWaterlogged(true);
+                target.setBlockData(waterlogged, true);
+                triggerNeighborUpdates(target);
+
+                boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
+                if (!removed) {
+                    plugin.getLogger().warning("Failed to decrement storage for " + player.getUniqueId());
+                }
+                storage.save();
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                int now = storage.getStored(player.getUniqueId(), fluidType);
+                player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: " + ChatColor.WHITE + now);
+
+                // Keep the bucket as the special bucket with the same mode.
+                ItemStack updated = bucketItems.setMode(inHand, mode);
+                setItemInHand(player, hand, updated);
+                return;
+            }
+        }
+
+        // Some interactions (notably with certain blocks like leaves) report the clicked block as the
+        // placement target even though vanilla would place into the adjacent block.
+        Block placeTarget = target;
+        if (clickedBlock != null && placeTarget.equals(clickedBlock)) {
+            Block faceTarget = clickedBlock.getRelative(event.getBlockFace());
+            if (!placeTarget.equals(faceTarget)) {
+                placeTarget = faceTarget;
+            }
+        }
+
+        if (placeTarget.getType() == placeMaterial) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.YELLOW + "There's already " + fluidType.name().toLowerCase() + " there.");
+            return;
+        }
+
+        if (!canPlaceInto(placeTarget)) {
             event.setCancelled(true);
             return;
         }
 
         event.setCancelled(true);
-
-        Material placeMaterial = (fluidType == FluidType.WATER) ? Material.WATER : Material.LAVA;
-        target.setType(placeMaterial, true);
+        placeTarget.setType(placeMaterial, true);
 
         boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
         if (!removed) {
@@ -343,6 +467,16 @@ public final class BucketListener implements Listener {
         }
         // Buckets can generally place into passable blocks (grass, etc.).
         return target.isPassable();
+    }
+
+    private static void triggerNeighborUpdates(Block block) {
+        // Apply physics on the changed block and its neighbors so water starts flowing immediately.
+        block.getState().update(true, true);
+
+        for (BlockFace face : new BlockFace[]{BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST, BlockFace.UP, BlockFace.DOWN}) {
+            Block relative = block.getRelative(face);
+            relative.getState().update(true, true);
+        }
     }
 
     private static ItemStack getItemInHand(Player player, EquipmentSlot hand) {

@@ -1,0 +1,7 @@
+storage:
+  # If true, stored sources are capped. If false, storage is unlimited.
+  limit-enabled: true
+
+  # Maximum number of stored source blocks per fluid type (water and lava).
+  # Only used when limit-enabled is true.
+  max-sources: 64

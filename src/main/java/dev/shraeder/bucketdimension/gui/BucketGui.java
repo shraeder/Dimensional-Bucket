@@ -54,7 +54,6 @@ public final class BucketGui {
         }
 
         meta.setDisplayName(name);
-
         List<String> lore = new ArrayList<>();
         lore.add(ChatColor.GRAY + "Stored: " + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), type));
 

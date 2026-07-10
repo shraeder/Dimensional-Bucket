@@ -10,7 +10,6 @@ import java.util.UUID;
 public final class StorageManager {
 
     private static final int WATER_PRIMING_SOURCES = 2;
-
     private final JavaPlugin plugin;
     private final File file;
     private YamlConfiguration config;

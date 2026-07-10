@@ -8,8 +8,10 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Levelled;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -52,16 +54,40 @@ public final class BucketListener implements Listener {
 
         Block block = event.getClickedBlock();
         Material type = block.getType();
+        BucketMode mode = bucketItems.getMode(item);
+
+        if (mode == BucketMode.WATER) {
+            BlockData data = block.getBlockData();
+            if (data instanceof Waterlogged waterlogged && !waterlogged.isWaterlogged()) {
+                if (storage.getStored(player.getUniqueId(), FluidType.WATER) <= 0) {
+                    event.setCancelled(true);
+                    player.sendMessage(ChatColor.RED + "You have no water stored.");
+                    return;
+                }
+
+                event.setCancelled(true);
+                waterlogged.setWaterlogged(true);
+                block.setBlockData(waterlogged, true);
+                triggerNeighborUpdates(block);
+
+                storage.tryRemove(player.getUniqueId(), FluidType.WATER, 1);
+                storage.save();
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: "
+                        + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), FluidType.WATER));
+
+                setItemInHand(player, hand, bucketItems.setMode(item, BucketMode.WATER));
+                return;
+            }
+        }
+
         if (type != Material.CAULDRON && type != Material.WATER_CAULDRON && type != Material.LAVA_CAULDRON) {
             return;
         }
 
-        // We handle cauldrons ourselves so the special bucket is never consumed/replaced.
         event.setCancelled(true);
 
-        BucketMode mode = bucketItems.getMode(item);
-
-        // COLLECT mode: drain cauldrons into storage.
         if (mode == BucketMode.COLLECT) {
             if (type == Material.WATER_CAULDRON) {
                 int level = getCauldronLevel(block);
@@ -83,7 +109,7 @@ public final class BucketListener implements Listener {
                 storage.save();
                 player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, 1f, 1f);
                 player.sendMessage(ChatColor.GREEN + "Stored 1 water source. Now: "
-                    + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), FluidType.WATER));
+                        + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), FluidType.WATER));
 
                 setItemInHand(player, hand, bucketItems.setMode(item, BucketMode.COLLECT));
                 return;
@@ -109,7 +135,6 @@ public final class BucketListener implements Listener {
             return;
         }
 
-        // WATER mode: fill/increase water cauldron.
         if (mode == BucketMode.WATER) {
             if (storage.getStored(player.getUniqueId(), FluidType.WATER) <= 0) {
                 player.sendMessage(ChatColor.RED + "You have no water stored.");
@@ -133,7 +158,7 @@ public final class BucketListener implements Listener {
                 setCauldronLevel(block, level + 1);
             }
 
-                storage.tryRemove(player.getUniqueId(), FluidType.WATER, 1);
+            storage.tryRemove(player.getUniqueId(), FluidType.WATER, 1);
             storage.save();
             player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
             player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: "
@@ -143,7 +168,6 @@ public final class BucketListener implements Listener {
             return;
         }
 
-        // LAVA mode: fill empty cauldron with lava.
         if (mode == BucketMode.LAVA) {
             if (storage.getStored(player.getUniqueId(), FluidType.LAVA) <= 0) {
                 player.sendMessage(ChatColor.RED + "You have no lava stored.");
@@ -175,7 +199,6 @@ public final class BucketListener implements Listener {
             return;
         }
 
-        // Prevent capturing fish/axolotl/etc with the special bucket.
         event.setCancelled(true);
         event.getPlayer().sendMessage(ChatColor.RED + "This bucket can't capture creatures.");
     }
@@ -206,6 +229,13 @@ public final class BucketListener implements Listener {
         };
 
         if (fluidType == null) {
+            BlockData data = clicked.getBlockData();
+            if (data instanceof Waterlogged waterlogged && waterlogged.isWaterlogged()) {
+                fluidType = FluidType.WATER;
+            }
+        }
+
+        if (fluidType == null) {
             return;
         }
 
@@ -231,7 +261,14 @@ public final class BucketListener implements Listener {
 
         event.setCancelled(true);
 
-        clicked.setType(Material.AIR, true);
+        BlockData data = clicked.getBlockData();
+        if (fluidType == FluidType.WATER && data instanceof Waterlogged waterlogged && waterlogged.isWaterlogged()) {
+            waterlogged.setWaterlogged(false);
+            clicked.setBlockData(waterlogged, true);
+            triggerNeighborUpdates(clicked);
+        } else {
+            clicked.setType(Material.AIR, true);
+        }
         storage.save();
 
         if (fluidType == FluidType.WATER) {
@@ -241,9 +278,8 @@ public final class BucketListener implements Listener {
         }
 
         player.sendMessage(ChatColor.GREEN + "Stored 1 " + fluidType.name().toLowerCase() + " source. Now: "
-            + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
+                + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
 
-        // Ensure the bucket stays as the special bucket.
         ItemStack updated = bucketItems.setMode(inHand, BucketMode.COLLECT);
         setItemInHand(player, hand, updated);
     }
@@ -266,7 +302,6 @@ public final class BucketListener implements Listener {
         };
 
         if (fluidType == null) {
-            // In collect mode, don't allow placing anything.
             if (mode == BucketMode.COLLECT) {
                 event.setCancelled(true);
                 player.sendMessage(ChatColor.YELLOW + "Select Water or Lava mode in the GUI to place stored liquid.");
@@ -281,20 +316,88 @@ public final class BucketListener implements Listener {
             return;
         }
 
-        Block target = event.getBlockClicked().getRelative(event.getBlockFace());
-        if (!canPlaceInto(target)) {
+        Block clickedBlock = event.getBlockClicked();
+        Block target = event.getBlock();
+        Material placeMaterial = (fluidType == FluidType.WATER) ? Material.WATER : Material.LAVA;
+
+        if (fluidType == FluidType.WATER) {
+            if (clickedBlock != null) {
+                BlockData clickedData = clickedBlock.getBlockData();
+                if (clickedData instanceof Waterlogged waterlogged && !waterlogged.isWaterlogged()) {
+                    event.setCancelled(true);
+                    waterlogged.setWaterlogged(true);
+                    clickedBlock.setBlockData(waterlogged, true);
+                    triggerNeighborUpdates(clickedBlock);
+
+                    boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
+                    if (!removed) {
+                        plugin.getLogger().warning("Failed to decrement storage for " + player.getUniqueId());
+                    }
+                    storage.save();
+
+                    player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                    player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: "
+                            + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
+
+                    ItemStack updated = bucketItems.setMode(inHand, mode);
+                    setItemInHand(player, hand, updated);
+                    return;
+                }
+            }
+
+            BlockData targetData = target.getBlockData();
+            if (targetData instanceof Waterlogged waterlogged) {
+                event.setCancelled(true);
+
+                if (waterlogged.isWaterlogged()) {
+                    player.sendMessage(ChatColor.YELLOW + "That block is already waterlogged.");
+                    return;
+                }
+
+                waterlogged.setWaterlogged(true);
+                target.setBlockData(waterlogged, true);
+                triggerNeighborUpdates(target);
+
+                boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
+                if (!removed) {
+                    plugin.getLogger().warning("Failed to decrement storage for " + player.getUniqueId());
+                }
+                storage.save();
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, 1f, 1f);
+                player.sendMessage(ChatColor.GREEN + "Used 1 water source. Remaining: "
+                        + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
+
+                ItemStack updated = bucketItems.setMode(inHand, mode);
+                setItemInHand(player, hand, updated);
+                return;
+            }
+        }
+
+        Block placeTarget = target;
+        if (clickedBlock != null && placeTarget.equals(clickedBlock)) {
+            Block faceTarget = clickedBlock.getRelative(event.getBlockFace());
+            if (!placeTarget.equals(faceTarget)) {
+                placeTarget = faceTarget;
+            }
+        }
+
+        if (placeTarget.getType() == placeMaterial) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.YELLOW + "There's already " + fluidType.name().toLowerCase() + " there.");
+            return;
+        }
+
+        if (!canPlaceInto(placeTarget)) {
             event.setCancelled(true);
             return;
         }
 
         event.setCancelled(true);
-
-        Material placeMaterial = (fluidType == FluidType.WATER) ? Material.WATER : Material.LAVA;
-        target.setType(placeMaterial, true);
+        placeTarget.setType(placeMaterial, true);
 
         boolean removed = storage.tryRemove(player.getUniqueId(), fluidType, 1);
         if (!removed) {
-            // Shouldn't happen if counts were accurate, but keep it safe.
             plugin.getLogger().warning("Failed to decrement storage for " + player.getUniqueId());
         }
         storage.save();
@@ -306,9 +409,8 @@ public final class BucketListener implements Listener {
         }
 
         player.sendMessage(ChatColor.GREEN + "Placed 1 " + fluidType.name().toLowerCase() + " source. Remaining: "
-            + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
+                + ChatColor.WHITE + storage.getDisplayAmount(player.getUniqueId(), fluidType));
 
-        // Keep the bucket as the special bucket with the same mode.
         ItemStack updated = bucketItems.setMode(inHand, mode);
         setItemInHand(player, hand, updated);
     }
@@ -332,7 +434,6 @@ public final class BucketListener implements Listener {
     private static void setCauldronLevel(Block block, int newLevel) {
         int clamped = Math.max(0, Math.min(3, newLevel));
         if (block.getType() != Material.WATER_CAULDRON) {
-            // Only water cauldrons have levels we care about.
             return;
         }
 
@@ -352,8 +453,16 @@ public final class BucketListener implements Listener {
         if (target.isEmpty()) {
             return true;
         }
-        // Buckets can generally place into passable blocks (grass, etc.).
         return target.isPassable();
+    }
+
+    private static void triggerNeighborUpdates(Block block) {
+        block.getState().update(true, true);
+
+        for (BlockFace face : new BlockFace[]{BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST, BlockFace.UP, BlockFace.DOWN}) {
+            Block relative = block.getRelative(face);
+            relative.getState().update(true, true);
+        }
     }
 
     private static ItemStack getItemInHand(Player player, EquipmentSlot hand) {

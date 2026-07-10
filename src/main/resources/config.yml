@@ -1,0 +1,14 @@
+storage:
+  # If true, stored sources are capped. If false, storage is unlimited.
+  # When water priming is enabled below, this limit does not apply to water.
+  limit-enabled: true
+
+  # Maximum number of stored source blocks per fluid type (water and lava).
+  # Only used when limit-enabled is true.
+  # Water ignores this once priming is enabled, because it stops counting after 2 sources.
+  max-sources: 64
+
+  water-priming:
+    # If true, storing 2 water sources primes the bucket for unlimited water dispensing.
+    # Primed water no longer counts upward and is not affected by max-sources.
+    enabled: true

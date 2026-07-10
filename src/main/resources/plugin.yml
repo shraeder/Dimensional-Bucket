@@ -1,0 +1,17 @@
+name: BucketDimension
+version: 1.0.0
+main: dev.shraeder.bucketdimension.BucketDimensionPlugin
+api-version: '1.21'
+author: Shraeder
+description: Bucket Dimension plugin.
+
+commands:
+  bucket:
+    description: Gives you the Bucket Dimension bucket.
+    usage: /bucket
+    permission: bucketdimension.bucket
+
+permissions:
+  bucketdimension.bucket:
+    description: Allows using /bucket.
+    default: true

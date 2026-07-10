@@ -382,7 +382,7 @@ public final class BucketListener implements Listener {
             }
         }
 
-        if (placeTarget.getType() == placeMaterial) {
+        if (placeTarget.getType() == placeMaterial && isSourceBlock(placeTarget)) {
             event.setCancelled(true);
             player.sendMessage(ChatColor.YELLOW + "There's already " + fluidType.name().toLowerCase() + " there.");
             return;

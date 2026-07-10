@@ -105,6 +105,14 @@ public final class StorageManager {
         return plugin.getConfig().getBoolean("storage.water-priming.enabled", true);
     }
 
+    public int getWaterPrimingSourcesRequired() {
+        return WATER_PRIMING_SOURCES;
+    }
+
+    public int getWaterPrimingProgress(UUID uuid) {
+        return Math.min(getStored(uuid, FluidType.WATER), WATER_PRIMING_SOURCES);
+    }
+
     public boolean hasUnlimitedDispense(UUID uuid, FluidType type) {
         return type == FluidType.WATER && isWaterPrimingEnabled() && getStored(uuid, type) >= WATER_PRIMING_SOURCES;
     }

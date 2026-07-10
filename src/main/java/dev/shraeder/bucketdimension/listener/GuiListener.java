@@ -60,7 +60,7 @@ public final class GuiListener implements Listener {
         event.setCancelled(true);
 
         openHandByPlayer.put(player.getUniqueId(), event.getHand() == null ? EquipmentSlot.HAND : event.getHand());
-        player.openInventory(BucketGui.create(player, storage));
+        player.openInventory(BucketGui.create(player, storage, bucketItems.getMode(item)));
     }
 
     @EventHandler
@@ -114,7 +114,7 @@ public final class GuiListener implements Listener {
             player.getInventory().setItemInMainHand(updated);
         }
 
-        player.sendMessage(ChatColor.GREEN + "Bucket mode set to " + ChatColor.WHITE + mode.name() + ChatColor.GREEN + ".");
+        player.sendMessage(ChatColor.GREEN + "Bucket mode set to " + ChatColor.WHITE + formatMode(mode) + ChatColor.GREEN + ".");
         player.closeInventory();
     }
 
@@ -127,5 +127,13 @@ public final class GuiListener implements Listener {
         if (event.getInventory().getHolder() instanceof BucketGuiHolder) {
             openHandByPlayer.remove(player.getUniqueId());
         }
+    }
+
+    private static String formatMode(BucketMode mode) {
+        return switch (mode) {
+            case WATER -> "Water";
+            case LAVA -> "Lava";
+            case COLLECT -> "Collect";
+        };
     }
 }
